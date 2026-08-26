@@ -26,6 +26,7 @@ export interface InferenceStatus {
   log_path: string | null;
   exited?: boolean;
   exit_code?: number | null;
+  cameras?: string[];
 }
 
 export async function startInference(
