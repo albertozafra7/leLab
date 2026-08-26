@@ -60,6 +60,10 @@ _inference_meta: dict[str, Any] = {}
 _state_lock = threading.Lock()
 _HUB_REF_RE = re.compile(r"^(?P<repo>[^@]+)@checkpoints/(?P<step_dir>\d+)$")
 _HUB_ROOT_REF_RE = re.compile(r"^(?P<repo>[^@]+)@root$")
+# Preview cameras opened in the server process for the /inference-camera-feed
+# endpoint.  Keys are the camera names from InferenceRequest.cameras.
+_inference_preview_cameras: dict[str, Any] = {}
+_inference_camera_keys: list[str] = []
 # lerobot prints this once per run, the moment its main control loop is
 # about to take over from the setup phase. We watch stdout for it so the
 # UI can present a "rollout time" separate from the multi-second policy
@@ -235,6 +239,107 @@ def _classify_outcome(rc: int | None, rollout_started: bool, error_text: str | N
     return "failed"
 
 
+
+def _open_preview_cameras(cameras_cfg: dict[str, dict[str, Any]]) -> None:
+    """Open lightweight preview camera instances in the server process.
+
+    Called in a daemon thread after the rollout subprocess starts, so the
+    subprocess always grabs the camera first.  V4L2 on Linux allows multiple
+    readers on the same device, so this is safe.
+    """
+    global _inference_preview_cameras, _inference_camera_keys
+
+    # Give the subprocess a head start so it connects first.
+    time.sleep(4.0)
+    if not inference_active:
+        return
+
+    try:
+        from lerobot.cameras.opencv import OpenCVCamera, OpenCVCameraConfig
+        from lerobot.cameras.configs import Cv2Backends
+    except ImportError:
+        logger.warning("inference camera preview: lerobot.cameras not importable")
+        return
+
+    opened: dict[str, Any] = {}
+    for name, cfg in cameras_cfg.items():
+        try:
+            idx = cfg.get("camera_index", cfg.get("index_or_path", 0))
+            w = int(cfg.get("width", 640))
+            h = int(cfg.get("height", 480))
+            fps = int(cfg.get("fps", 30))
+            backend_str = cfg.get("backend", "")
+            backend = Cv2Backends[backend_str] if backend_str and backend_str in Cv2Backends.__members__ else None
+            oc_cfg = OpenCVCameraConfig(
+                index_or_path=idx,
+                width=w,
+                height=h,
+                fps=fps,
+                **({"backend": backend} if backend is not None else {}),
+            )
+            cam = OpenCVCamera(oc_cfg)
+            cam.connect()
+            opened[name] = cam
+            logger.info("inference preview camera %r connected (index=%s)", name, idx)
+        except Exception as exc:
+            logger.warning("inference preview camera %r failed to open: %s", name, exc)
+
+    with _state_lock:
+        _inference_preview_cameras = opened
+        _inference_camera_keys = list(opened.keys())
+
+
+def _close_preview_cameras() -> None:
+    """Disconnect all inference preview cameras."""
+    global _inference_preview_cameras, _inference_camera_keys
+    with _state_lock:
+        cams = _inference_preview_cameras
+        _inference_preview_cameras = {}
+        _inference_camera_keys = []
+    for name, cam in cams.items():
+        try:
+            cam.disconnect()
+        except Exception as exc:
+            logger.debug("inference preview camera %r disconnect error: %s", name, exc)
+
+
+def inference_camera_feed_frames(cam_key: str, fps: float = 15.0):
+    """Yield multipart-MJPEG chunks for one inference preview camera.
+
+    Mirrors record.camera_feed_frames() but reads from the server-side
+    preview camera instances opened alongside the rollout subprocess.
+    """
+    import cv2
+
+    interval = 1.0 / fps
+    # Wait up to 15 s for the preview cameras to connect (they open ~4 s
+    # after subprocess start to let it grab the device first).
+    deadline = time.time() + 15.0
+    while inference_active and cam_key not in _inference_preview_cameras and time.time() < deadline:
+        time.sleep(0.2)
+
+    while inference_active:
+        cam = _inference_preview_cameras.get(cam_key)
+        if cam is None:
+            break
+        try:
+            frame = cam.read_latest()
+        except (TimeoutError, RuntimeError):
+            time.sleep(interval)
+            continue
+        except Exception as exc:
+            logger.warning("inference-camera-feed %s: read error: %s", cam_key, exc)
+            break
+
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr)
+        if not ok:
+            time.sleep(interval)
+            continue
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        time.sleep(interval)
+
+
 def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
     """Start a one-shot rollout subprocess. Returns a dict — the route
     layer turns it into a JSON response or HTTPException as appropriate."""
@@ -340,6 +445,15 @@ def handle_start_inference(request: InferenceRequest) -> dict[str, Any]:
             "log_path": str(log_path),
         }
     logger.info("Inference started: pid=%s policy=%s", proc.pid, policy_path)
+    # Open preview cameras in background — they become available ~4 s after start.
+    if request.cameras:
+        preview_thread = threading.Thread(
+            target=_open_preview_cameras,
+            args=(dict(request.cameras),),
+            daemon=True,
+            name="inference-preview-cameras",
+        )
+        preview_thread.start()
     return {"success": True, "message": "Inference started", "log_path": str(log_path)}
 
 
@@ -369,6 +483,7 @@ def handle_stop_inference() -> dict[str, Any]:
         _inference_started_at = None
         _inference_rollout_started_at = None
         _inference_meta = {}
+    _close_preview_cameras()
     return {"success": True, "message": "Inference stopped"}
 
 
@@ -390,6 +505,7 @@ def handle_inference_status() -> dict[str, Any]:
             _inference_started_at = None
             _inference_rollout_started_at = None
             _inference_meta = {}
+            _close_preview_cameras()
             # On failure, surface the real error from the log so the UI doesn't
             # have to send the user digging through the cache.
             error = _extract_error_from_log(finished_meta.get("log_path")) if rc else None
@@ -420,4 +536,5 @@ def handle_inference_status() -> dict[str, Any]:
             "duration_s": _inference_meta.get("duration_s"),
             "policy_ref": _inference_meta.get("policy_ref"),
             "log_path": _inference_meta.get("log_path"),
+            "cameras": list(_inference_camera_keys),
         }

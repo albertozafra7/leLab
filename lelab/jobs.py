@@ -43,7 +43,7 @@ from .train import TrainingRequest
 logger = logging.getLogger(__name__)
 
 
-JobState = Literal["running", "done", "failed", "interrupted"]
+JobState = Literal["running", "paused", "done", "failed", "interrupted"]
 
 
 class JobTarget(BaseModel):
@@ -921,16 +921,59 @@ class JobRegistry:
             if record is None:
                 raise JobNotFoundError(job_id)
             runner = self._runners.get(job_id)
-        if record.state != "running" or runner is None:
+        if record.state not in ("running", "paused") or runner is None:
             raise JobNotRunningError(job_id)
+        # If paused, resume first so the process can shut down cleanly
+        if record.state == "paused":
+            pid = runner.pid
+            if pid is not None and _pid_alive(pid):
+                os.kill(pid, signal.SIGCONT)
         runner.stop()
         # The watchdog will finalise the record (state, ended_at, exit_code).
         # Wait briefly so the caller sees the new state in the response.
         for _ in range(20):
             time.sleep(0.1)
             with self._lock:
-                if record.state != "running":
+                if record.state not in ("running", "paused"):
                     return record
+        return record
+
+    def pause(self, job_id: str) -> JobRecord:
+        """Send SIGSTOP to the training process — freezes it without killing."""
+        with self._lock:
+            record = self._records.get(job_id)
+            if record is None:
+                raise JobNotFoundError(job_id)
+            runner = self._runners.get(job_id)
+        if record.state != "running" or runner is None:
+            raise JobNotRunningError(job_id)
+        pid = runner.pid
+        if pid is None or not _pid_alive(pid):
+            raise JobNotRunningError(job_id)
+        os.kill(pid, signal.SIGSTOP)
+        with self._lock:
+            record.state = "paused"
+        self._persist_meta(job_id)
+        self._notify_change()
+        return record
+
+    def resume(self, job_id: str) -> JobRecord:
+        """Send SIGCONT to a paused training process."""
+        with self._lock:
+            record = self._records.get(job_id)
+            if record is None:
+                raise JobNotFoundError(job_id)
+            runner = self._runners.get(job_id)
+        if record.state != "paused":
+            raise ValueError(f"Job {job_id!r} is not paused (state: {record.state!r})")
+        pid = runner.pid if runner else record.process_pid
+        if pid is None or not _pid_alive(pid):
+            raise JobNotRunningError(job_id)
+        os.kill(pid, signal.SIGCONT)
+        with self._lock:
+            record.state = "running"
+        self._persist_meta(job_id)
+        self._notify_change()
         return record
 
     def drain_logs(self, job_id: str) -> builtins.list[LogLine]:
@@ -1102,6 +1145,19 @@ class JobRegistry:
         with contextlib.suppress(FileNotFoundError):
             shutil.rmtree(_job_dir(self._output_root, job_id))
         self._notify_change()
+
+    def rename(self, job_id: str, name: str) -> JobRecord:
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValueError("name is required")
+        with self._lock:
+            record = self._records.get(job_id)
+            if record is None:
+                raise JobNotFoundError(job_id)
+            record.name = cleaned
+            self._persist(record, force=True)
+        self._notify_change()
+        return record
 
     def shutdown(self) -> None:
         """For tests / orderly process exit. Not wired to FastAPI lifespan today."""
