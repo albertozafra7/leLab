@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -152,9 +152,12 @@ const Inference: React.FC = () => {
     : "FINISHED";
   const timerSeconds = isRunning ? rolloutElapsed : setupElapsed;
 
+  const cameras = status?.cameras ?? [];
+  const hasCameras = cameras.length > 0;
+
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center gap-4 mb-8">
+    <div className="h-screen bg-black text-white flex flex-col p-4 sm:p-6 overflow-hidden">
+      <div className="flex items-center gap-4 mb-4 flex-shrink-0">
         <Button
           variant="ghost"
           size="icon"
@@ -167,8 +170,27 @@ const Inference: React.FC = () => {
         <h1 className="font-bold text-white text-2xl">Inference</h1>
       </div>
 
-      <div className="flex-1 flex items-center justify-center">
-        <div className="bg-gray-900 rounded-lg border border-gray-700 p-8 w-full max-w-xl">
+      <div className={`flex-1 min-h-0 flex ${hasCameras ? "flex-row gap-4" : "items-center justify-center"}`}>
+        {/* Camera feeds */}
+        {hasCameras && (
+          <div className={`flex-1 min-w-0 grid gap-2 content-start ${cameras.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+            {cameras.map((key) => (
+              <div key={key} className="rounded-lg overflow-hidden border border-gray-700 bg-gray-900 flex flex-col">
+                <img
+                  src={`/inference-camera-feed/${encodeURIComponent(key)}`}
+                  alt={key}
+                  className="w-full object-contain bg-black"
+                  style={{ maxHeight: "46vh" }}
+                />
+                <div className="px-2 py-1 text-xs text-gray-500 truncate">{key.split(".").pop()}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Status card */}
+        <div className={`${hasCameras ? "w-80 flex-shrink-0" : "w-full max-w-xl"} flex items-center`}>
+        <div className="bg-gray-900 rounded-lg border border-gray-700 p-8 w-full">
           <div className="text-center mb-6">
             <div
               className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold tracking-widest ${
@@ -224,6 +246,7 @@ const Inference: React.FC = () => {
             <Square className="w-5 h-5 mr-2" />
             Stop
           </Button>
+        </div>
         </div>
       </div>
 
