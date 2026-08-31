@@ -40,6 +40,7 @@ class TrainingRequest(BaseModel):
 
     # Policy configuration
     policy_type: str = "act"
+    policy_path: str | None = None
 
     # Core training parameters
     steps: int = 10000
@@ -92,6 +93,28 @@ class TrainingRequest(BaseModel):
     policy_relative_exclude_joints: list[str] | None = None
     policy_use_bf16: bool | None = None
 
+    # Diffusion-specific policy options.
+    diffusion_n_obs_steps: int | None = None
+    diffusion_horizon: int | None = None
+    diffusion_n_action_steps: int | None = None
+    diffusion_drop_n_last_frames: int | None = None
+    diffusion_vision_backbone: str | None = None
+    diffusion_crop_is_random: bool | None = None
+    diffusion_use_group_norm: bool | None = None
+    diffusion_use_separate_rgb_encoder_per_camera: bool | None = None
+    diffusion_kernel_size: int | None = None
+    diffusion_n_groups: int | None = None
+    diffusion_step_embed_dim: int | None = None
+    diffusion_use_film_scale_modulation: bool | None = None
+    diffusion_noise_scheduler_type: str | None = None
+    diffusion_num_train_timesteps: int | None = None
+    diffusion_beta_schedule: str | None = None
+    diffusion_prediction_type: str | None = None
+    diffusion_clip_sample: bool | None = None
+    diffusion_clip_sample_range: float | None = None
+    diffusion_num_inference_steps: int | None = None
+    diffusion_do_mask_loss_for_padding: bool | None = None
+
     # Optimizer
     optimizer_type: str | None = "adam"
     optimizer_lr: float | None = None
@@ -122,6 +145,17 @@ def build_training_command(
     that lacks lerobot.
     """
     cmd: list[str] = [python_executable, "-m", "lerobot.scripts.lerobot_train"]
+    has_pretrained_policy = request.policy_path is not None
+
+    def add_policy_option(name: str, value: str) -> None:
+        flag = f"--policy.{name}"
+        if has_pretrained_policy:
+            # LeRobot's path-field parser only recognizes joined arguments. It
+            # also removes every --policy.* token before loading the checkpoint,
+            # then reapplies them through get_cli_overrides().
+            cmd.append(f"{flag}={value}")
+        else:
+            cmd.extend([flag, value])
 
     # Dataset
     cmd.extend(["--dataset.repo_id", request.dataset_repo_id])
@@ -134,8 +168,26 @@ def build_training_command(
     if request.dataset_image_transforms_enable:
         cmd.extend(["--dataset.image_transforms.enable", "true"])
 
-    # Policy
-    cmd.extend(["--policy.type", request.policy_type])
+    # Policy. Loading a checkpoint initializes a new fine-tuning run; `resume`
+    # remains reserved for continuing the optimizer state of an interrupted run.
+    if request.policy_path:
+        policy_path = request.policy_path
+        if "@checkpoints/" in policy_path or policy_path.endswith("@root"):
+            if job_target is not None and job_target.runner == "hf_cloud":
+                if policy_path.endswith("@root"):
+                    policy_path = policy_path.removesuffix("@root")
+                else:
+                    raise ValueError(
+                        "Fine-tuning a specific Hub checkpoint is only supported for local training. "
+                        "Use the model repository's final checkpoint for HF Cloud training."
+                    )
+            else:
+                from .rollout import _resolve_policy_path
+
+                policy_path = _resolve_policy_path(policy_path)
+        cmd.append(f"--policy.path={policy_path}")
+    else:
+        cmd.extend(["--policy.type", request.policy_type])
 
     # Core training params
     cmd.extend(["--steps", str(request.steps)])
@@ -146,17 +198,17 @@ def build_training_command(
 
     # Policy device / AMP / hub
     if request.policy_device:
-        cmd.extend(["--policy.device", request.policy_device])
-    cmd.extend(["--policy.use_amp", "true" if request.policy_use_amp else "false"])
+        add_policy_option("device", request.policy_device)
+    add_policy_option("use_amp", "true" if request.policy_use_amp else "false")
     # On HF Cloud, lerobot's submit_to_hf owns the model repo and sets push_to_hub on
     # the pod itself; _pod_forwarded_args drops any --policy.push_to_hub/--policy.repo_id
     # we'd pass, so we must not emit them. Local runs keep the existing behavior:
     # LeRobot defaults push_to_hub=True and demands --policy.repo_id when so.
     is_cloud = job_target is not None and job_target.runner == "hf_cloud"
     if not is_cloud:
-        cmd.extend(["--policy.push_to_hub", "true" if request.policy_push_to_hub else "false"])
+        add_policy_option("push_to_hub", "true" if request.policy_push_to_hub else "false")
         if request.policy_push_to_hub and request.policy_repo_id:
-            cmd.extend(["--policy.repo_id", request.policy_repo_id])
+            add_policy_option("repo_id", request.policy_repo_id)
 
     # GR00T-specific policy flags. These options only exist on the groot config,
     # so emit them only for --policy.type=groot; sending them to another policy
@@ -164,24 +216,52 @@ def build_training_command(
     # config's own defaults apply.
     if request.policy_type == "groot":
         if request.policy_base_model_path:
-            cmd.extend(["--policy.base_model_path", request.policy_base_model_path])
+            add_policy_option("base_model_path", request.policy_base_model_path)
         if request.policy_embodiment_tag:
-            cmd.extend(["--policy.embodiment_tag", request.policy_embodiment_tag])
+            add_policy_option("embodiment_tag", request.policy_embodiment_tag)
         if request.policy_chunk_size is not None:
-            cmd.extend(["--policy.chunk_size", str(request.policy_chunk_size)])
+            add_policy_option("chunk_size", str(request.policy_chunk_size))
         if request.policy_n_action_steps is not None:
-            cmd.extend(["--policy.n_action_steps", str(request.policy_n_action_steps)])
+            add_policy_option("n_action_steps", str(request.policy_n_action_steps))
         if request.policy_use_relative_actions is not None:
-            cmd.extend(
-                ["--policy.use_relative_actions", "true" if request.policy_use_relative_actions else "false"]
+            add_policy_option(
+                "use_relative_actions", "true" if request.policy_use_relative_actions else "false"
             )
         if request.policy_relative_exclude_joints is not None:
             # draccus parses list values from a single JSON token, e.g. '["gripper"]'.
-            cmd.extend(
-                ["--policy.relative_exclude_joints", json.dumps(request.policy_relative_exclude_joints)]
+            add_policy_option(
+                "relative_exclude_joints", json.dumps(request.policy_relative_exclude_joints)
             )
         if request.policy_use_bf16 is not None:
-            cmd.extend(["--policy.use_bf16", "true" if request.policy_use_bf16 else "false"])
+            add_policy_option("use_bf16", "true" if request.policy_use_bf16 else "false")
+
+    if request.policy_type == "diffusion":
+        diffusion_options = {
+            "n_obs_steps": request.diffusion_n_obs_steps,
+            "horizon": request.diffusion_horizon,
+            "n_action_steps": request.diffusion_n_action_steps,
+            "drop_n_last_frames": request.diffusion_drop_n_last_frames,
+            "vision_backbone": request.diffusion_vision_backbone,
+            "crop_is_random": request.diffusion_crop_is_random,
+            "use_group_norm": request.diffusion_use_group_norm,
+            "use_separate_rgb_encoder_per_camera": request.diffusion_use_separate_rgb_encoder_per_camera,
+            "kernel_size": request.diffusion_kernel_size,
+            "n_groups": request.diffusion_n_groups,
+            "diffusion_step_embed_dim": request.diffusion_step_embed_dim,
+            "use_film_scale_modulation": request.diffusion_use_film_scale_modulation,
+            "noise_scheduler_type": request.diffusion_noise_scheduler_type,
+            "num_train_timesteps": request.diffusion_num_train_timesteps,
+            "beta_schedule": request.diffusion_beta_schedule,
+            "prediction_type": request.diffusion_prediction_type,
+            "clip_sample": request.diffusion_clip_sample,
+            "clip_sample_range": request.diffusion_clip_sample_range,
+            "num_inference_steps": request.diffusion_num_inference_steps,
+            "do_mask_loss_for_padding": request.diffusion_do_mask_loss_for_padding,
+        }
+        for option, value in diffusion_options.items():
+            if value is not None:
+                encoded = str(value).lower() if isinstance(value, bool) else str(value)
+                add_policy_option(option, encoded)
 
     # Logging / checkpointing
     cmd.extend(["--log_freq", str(request.log_freq)])

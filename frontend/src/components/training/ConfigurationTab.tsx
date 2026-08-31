@@ -1,6 +1,8 @@
 import React from 'react';
 import EssentialsCard from './config/EssentialsCard';
 import GrootCard from './config/GrootCard';
+import DiffusionCard from './config/DiffusionCard';
+import FineTuneCard from './config/FineTuneCard';
 import AdvancedCard from './config/AdvancedCard';
 import TargetCard from './config/TargetCard';
 import { ConfigComponentProps } from './types';
@@ -39,7 +41,9 @@ const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
         datasets={datasets}
         datasetsLoading={datasetsLoading}
       />
+      <FineTuneCard config={config} updateConfig={updateConfig} />
       <GrootCard config={config} updateConfig={updateConfig} />
+      <DiffusionCard config={config} updateConfig={updateConfig} />
       <AdvancedCard config={config} updateConfig={updateConfig} />
     </div>
   );

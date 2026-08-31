@@ -222,3 +222,85 @@ def test_groot_policy_flags_are_emitted_only_for_groot() -> None:
     assert "--policy.use_relative_actions" not in non_groot
     assert "--policy.relative_exclude_joints" not in non_groot
     assert "--policy.use_bf16" not in non_groot
+
+
+def test_pretrained_policy_path_replaces_policy_type() -> None:
+    from lelab.train import TrainingRequest, build_training_command
+
+    cmd = build_training_command(
+        TrainingRequest(
+            dataset_repo_id="x",
+            policy_type="diffusion",
+            policy_path="/models/checkpoint/pretrained_model",
+        ),
+        "/tmp/out",
+    )
+
+    assert "--policy.path=/models/checkpoint/pretrained_model" in cmd
+    assert "--policy.device=cuda" in cmd
+    assert "--policy.use_amp=false" in cmd
+    assert "--policy.push_to_hub=false" in cmd
+    assert "--policy.path" not in cmd
+    assert "--policy.device" not in cmd
+    assert "--policy.type" not in cmd
+
+
+def test_diffusion_policy_flags_are_emitted_only_for_diffusion() -> None:
+    from lelab.train import TrainingRequest, build_training_command
+
+    req = TrainingRequest(
+        dataset_repo_id="x",
+        policy_type="diffusion",
+        diffusion_n_obs_steps=3,
+        diffusion_horizon=48,
+        diffusion_n_action_steps=24,
+        diffusion_noise_scheduler_type="DDIM",
+        diffusion_num_train_timesteps=50,
+        diffusion_prediction_type="sample",
+        diffusion_clip_sample=False,
+        diffusion_clip_sample_range=1.5,
+        diffusion_do_mask_loss_for_padding=True,
+    )
+    cmd = build_training_command(req, "/tmp/out")
+
+    assert _arg_value(cmd, "--policy.n_obs_steps") == "3"
+    assert _arg_value(cmd, "--policy.horizon") == "48"
+    assert _arg_value(cmd, "--policy.n_action_steps") == "24"
+    assert _arg_value(cmd, "--policy.noise_scheduler_type") == "DDIM"
+    assert _arg_value(cmd, "--policy.num_train_timesteps") == "50"
+    assert _arg_value(cmd, "--policy.prediction_type") == "sample"
+    assert _arg_value(cmd, "--policy.clip_sample") == "false"
+    assert _arg_value(cmd, "--policy.clip_sample_range") == "1.5"
+    assert _arg_value(cmd, "--policy.do_mask_loss_for_padding") == "true"
+
+    non_diffusion = build_training_command(
+        TrainingRequest(
+            dataset_repo_id="x",
+            policy_type="act",
+            diffusion_horizon=48,
+            diffusion_noise_scheduler_type="DDIM",
+        ),
+        "/tmp/out",
+    )
+    assert "--policy.horizon" not in non_diffusion
+    assert "--policy.noise_scheduler_type" not in non_diffusion
+
+
+def test_cloud_finetune_accepts_hub_root_and_rejects_specific_checkpoint() -> None:
+    from lelab.jobs import JobTarget
+    from lelab.train import TrainingRequest, build_training_command
+
+    target = JobTarget(runner="hf_cloud", flavor="a10g-small")
+    root_cmd = build_training_command(
+        TrainingRequest(dataset_repo_id="x", policy_path="user/model@root"),
+        "/tmp/out",
+        job_target=target,
+    )
+    assert "--policy.path=user/model" in root_cmd
+
+    with pytest.raises(ValueError, match="specific Hub checkpoint"):
+        build_training_command(
+            TrainingRequest(dataset_repo_id="x", policy_path="user/model@checkpoints/001000"),
+            "/tmp/out",
+            job_target=target,
+        )

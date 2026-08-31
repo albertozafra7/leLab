@@ -1,6 +1,6 @@
 import { ApiError, Fetcher, apiRequest } from "./apiClient";
 
-export type JobState = "running" | "done" | "failed" | "interrupted";
+export type JobState = "running" | "paused" | "done" | "failed" | "interrupted";
 
 export interface TrainingMetrics {
   current_step: number;
@@ -28,6 +28,7 @@ export type MetricsHistoryPoint = {
 export interface TrainingRequest {
   dataset_repo_id: string;
   policy_type: string;
+  policy_path?: string;
   steps: number;
   batch_size: number;
   seed?: number;
@@ -59,6 +60,27 @@ export interface TrainingRequest {
   policy_use_relative_actions?: boolean;
   policy_relative_exclude_joints?: string[];
   policy_use_bf16?: boolean;
+  // Diffusion-specific (only sent when policy_type === "diffusion").
+  diffusion_n_obs_steps?: number;
+  diffusion_horizon?: number;
+  diffusion_n_action_steps?: number;
+  diffusion_drop_n_last_frames?: number;
+  diffusion_vision_backbone?: string;
+  diffusion_crop_is_random?: boolean;
+  diffusion_use_group_norm?: boolean;
+  diffusion_use_separate_rgb_encoder_per_camera?: boolean;
+  diffusion_kernel_size?: number;
+  diffusion_n_groups?: number;
+  diffusion_step_embed_dim?: number;
+  diffusion_use_film_scale_modulation?: boolean;
+  diffusion_noise_scheduler_type?: string;
+  diffusion_num_train_timesteps?: number;
+  diffusion_beta_schedule?: string;
+  diffusion_prediction_type?: string;
+  diffusion_clip_sample?: boolean;
+  diffusion_clip_sample_range?: number;
+  diffusion_num_inference_steps?: number;
+  diffusion_do_mask_loss_for_padding?: boolean;
   // Optional target for runner dispatch; omitted ⇒ local.
   target?: { runner: "local" | "hf_cloud"; flavor?: string };
 }
@@ -240,6 +262,19 @@ export async function deleteJob(
   await apiRequest<void>(baseUrl, fetcher, `/jobs/${id}`, {
     method: "DELETE",
     action: "Delete job",
+  });
+}
+
+export async function renameJob(
+  baseUrl: string,
+  fetcher: Fetcher,
+  id: string,
+  name: string,
+): Promise<JobRecord> {
+  return apiRequest<JobRecord>(baseUrl, fetcher, `/jobs/${id}`, {
+    method: "PATCH",
+    body: { name },
+    action: "Rename job",
   });
 }
 

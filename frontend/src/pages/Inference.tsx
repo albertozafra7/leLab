@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Logo from "@/components/Logo";
 import { useApi } from "@/contexts/ApiContext";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -37,6 +36,20 @@ const Inference: React.FC = () => {
   const [status, setStatus] = useState<InferenceStatus | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const navigatedAwayRef = useRef(false);
+  const [cameraArea, setCameraArea] = useState({ w: 0, h: 0 });
+  const cameraAreaObserver = useRef<ResizeObserver | null>(null);
+  const cameraAreaRef = useCallback((node: HTMLDivElement | null) => {
+    cameraAreaObserver.current?.disconnect();
+    cameraAreaObserver.current = null;
+    if (node) {
+      const observer = new ResizeObserver((entries) => {
+        const rect = entries[0].contentRect;
+        setCameraArea({ w: rect.width, h: rect.height });
+      });
+      observer.observe(node);
+      cameraAreaObserver.current = observer;
+    }
+  }, []);
   // Independent flag: we may request a stop (safety net) before the run
   // is actually inactive. We must not flip navigatedAwayRef yet — that
   // would block the natural completion path on the next tick.
@@ -126,6 +139,33 @@ const Inference: React.FC = () => {
     }
   };
 
+  const cameras = status?.cameras ?? [];
+  const hasCameras = cameras.length > 0;
+  const cameraWindow = useMemo(() => {
+    const { w, h } = cameraArea;
+    if (!cameras.length || w <= 0 || h <= 0) {
+      return { width: 0, height: 0 };
+    }
+
+    const aspect = 4 / 3;
+    const gap = 12;
+    let best = { width: 0, height: 0, area: -1 };
+    for (let cols = 1; cols <= cameras.length; cols++) {
+      const rows = Math.ceil(cameras.length / cols);
+      const cellWidth = (w - gap * (cols - 1)) / cols;
+      const cellHeight = (h - gap * (rows - 1)) / rows;
+      if (cellWidth <= 0 || cellHeight <= 0) continue;
+      const width = Math.min(cellWidth, cellHeight * aspect);
+      const height = width / aspect;
+      const area = width * height;
+      if (area > best.area) best = { width, height, area };
+    }
+    return {
+      width: Math.floor(best.width),
+      height: Math.floor(best.height),
+    };
+  }, [cameraArea, cameras.length]);
+
   if (!status) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -152,46 +192,28 @@ const Inference: React.FC = () => {
     : "FINISHED";
   const timerSeconds = isRunning ? rolloutElapsed : setupElapsed;
 
-  const cameras = status?.cameras ?? [];
-  const hasCameras = cameras.length > 0;
-
   return (
-    <div className="h-screen bg-black text-white flex flex-col p-4 sm:p-6 overflow-hidden">
-      <div className="flex items-center gap-4 mb-4 flex-shrink-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => navigate("/")}
-          className="text-slate-400 hover:bg-slate-800 hover:text-white rounded-lg"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <Logo />
-        <h1 className="font-bold text-white text-2xl">Inference</h1>
-      </div>
+    <div className="h-screen bg-black text-white p-6 flex flex-col overflow-hidden">
+      <div className="max-w-7xl w-full mx-auto flex-1 min-h-0 flex flex-col">
+        <div className="mb-3 flex-shrink-0">
+          <Button
+            onClick={() => navigate("/")}
+            variant="outline"
+            className="border-gray-500 hover:border-gray-200 text-gray-300 hover:text-white"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Home
+          </Button>
+        </div>
 
-      <div className={`flex-1 min-h-0 flex ${hasCameras ? "flex-row gap-4" : "items-center justify-center"}`}>
-        {/* Camera feeds */}
-        {hasCameras && (
-          <div className={`flex-1 min-w-0 grid gap-2 content-start ${cameras.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
-            {cameras.map((key) => (
-              <div key={key} className="rounded-lg overflow-hidden border border-gray-700 bg-gray-900 flex flex-col">
-                <img
-                  src={`/inference-camera-feed/${encodeURIComponent(key)}`}
-                  alt={key}
-                  className="w-full object-contain bg-black"
-                  style={{ maxHeight: "46vh" }}
-                />
-                <div className="px-2 py-1 text-xs text-gray-500 truncate">{key.split(".").pop()}</div>
-              </div>
-            ))}
+        <div className="bg-gray-900 rounded-lg border border-gray-700 p-6 flex-1 min-h-0 flex flex-col justify-center">
+          <div className="flex justify-end items-center gap-4 mb-3 flex-shrink-0 text-sm text-gray-400">
+            <span className="truncate">
+              Policy <span className="text-white font-semibold">{status.policy_ref ?? "(unknown)"}</span>
+            </span>
           </div>
-        )}
 
-        {/* Status card */}
-        <div className={`${hasCameras ? "w-80 flex-shrink-0" : "w-full max-w-xl"} flex items-center`}>
-        <div className="bg-gray-900 rounded-lg border border-gray-700 p-8 w-full">
-          <div className="text-center mb-6">
+          <div className="text-center mb-3 flex-shrink-0">
             <div
               className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold tracking-widest ${
                 isSettingUp
@@ -208,7 +230,38 @@ const Inference: React.FC = () => {
             </div>
           </div>
 
-          <div className="text-center mb-4">
+          {hasCameras && (
+            <div
+              ref={cameraAreaRef}
+              className="flex-1 min-h-0 flex flex-wrap gap-3 justify-center content-center overflow-hidden mb-3"
+            >
+              {cameras.map((key) => (
+                <div
+                  key={key}
+                  style={
+                    cameraWindow.width > 0 && cameraWindow.height > 0
+                      ? {
+                          width: cameraWindow.width,
+                          height: cameraWindow.height,
+                        }
+                      : undefined
+                  }
+                  className="relative w-full max-w-3xl aspect-[4/3] bg-gray-900 rounded-lg border border-gray-700 overflow-hidden flex items-center justify-center"
+                >
+                  <img
+                    src={`/inference-camera-feed/${encodeURIComponent(key)}`}
+                    alt={`${key} live feed`}
+                    className="w-full h-full object-cover"
+                  />
+                  <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-sm text-gray-200">
+                    {key.split(".").pop()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="text-center mb-3 flex-shrink-0">
             <div
               className={`text-7xl font-mono font-bold leading-none ${
                 isSettingUp ? "text-amber-400" : "text-green-400"
@@ -223,7 +276,7 @@ const Inference: React.FC = () => {
             </div>
           </div>
 
-          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-8">
+          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-4 flex-shrink-0">
             <div
               className={`h-1.5 rounded-full transition-all duration-500 ${
                 isSettingUp
@@ -234,19 +287,14 @@ const Inference: React.FC = () => {
             />
           </div>
 
-          <div className="text-xs text-slate-500 break-all mb-6">
-            policy: {status.policy_ref ?? "(unknown)"}
-          </div>
-
           <Button
             onClick={() => setShowStopConfirm(true)}
             disabled={!status.inference_active}
-            className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-6 text-lg disabled:opacity-50"
+            className="w-full flex-shrink-0 bg-red-500 hover:bg-red-600 text-white font-semibold py-6 text-lg disabled:opacity-50"
           >
             <Square className="w-5 h-5 mr-2" />
             Stop
           </Button>
-        </div>
         </div>
       </div>
 

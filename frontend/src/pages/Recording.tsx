@@ -737,8 +737,6 @@ const Recording = () => {
   );
 };
 
-export default Recording;
-
 interface CameraFeedProps {
   baseUrl: string;
   name: string;
@@ -810,3 +808,5 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
     </div>
   );
 };
+
+export default Recording;

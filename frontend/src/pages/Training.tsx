@@ -15,7 +15,7 @@ import HfAuthBanner from "@/components/landing/HfAuthBanner";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Loader2, Pause, Play, Square, Trash2, ArrowLeft } from "lucide-react";
+import { Loader2, Pause, Play, Square, Trash2, ArrowLeft, Pencil } from "lucide-react";
 
 import { DatasetItem, listDatasets } from "@/lib/replayApi";
 import {
@@ -30,6 +30,7 @@ import {
   pauseJob,
   resumeJob,
   deleteJob,
+  renameJob,
   listRunnerHardware,
   RunnerFlavor,
 } from "@/lib/jobsApi";
@@ -74,6 +75,7 @@ function configToRequest(c: TrainingConfig): TrainingRequest {
     target: c.target,
     dataset_repo_id: c.dataset_repo_id,
     policy_type: c.policy_type,
+    policy_path: c.policy_path,
     steps: c.steps,
     batch_size: c.batch_size,
     seed: c.seed,
@@ -109,6 +111,31 @@ function configToRequest(c: TrainingConfig): TrainingRequest {
           policy_use_bf16: c.policy_use_bf16,
         }
       : {}),
+    ...(c.policy_type === "diffusion"
+      ? {
+          diffusion_n_obs_steps: c.diffusion_n_obs_steps,
+          diffusion_horizon: c.diffusion_horizon,
+          diffusion_n_action_steps: c.diffusion_n_action_steps,
+          diffusion_drop_n_last_frames: c.diffusion_drop_n_last_frames,
+          diffusion_vision_backbone: c.diffusion_vision_backbone,
+          diffusion_crop_is_random: c.diffusion_crop_is_random,
+          diffusion_use_group_norm: c.diffusion_use_group_norm,
+          diffusion_use_separate_rgb_encoder_per_camera:
+            c.diffusion_use_separate_rgb_encoder_per_camera,
+          diffusion_kernel_size: c.diffusion_kernel_size,
+          diffusion_n_groups: c.diffusion_n_groups,
+          diffusion_step_embed_dim: c.diffusion_step_embed_dim,
+          diffusion_use_film_scale_modulation: c.diffusion_use_film_scale_modulation,
+          diffusion_noise_scheduler_type: c.diffusion_noise_scheduler_type,
+          diffusion_num_train_timesteps: c.diffusion_num_train_timesteps,
+          diffusion_beta_schedule: c.diffusion_beta_schedule,
+          diffusion_prediction_type: c.diffusion_prediction_type,
+          diffusion_clip_sample: c.diffusion_clip_sample,
+          diffusion_clip_sample_range: c.diffusion_clip_sample_range,
+          diffusion_num_inference_steps: c.diffusion_num_inference_steps,
+          diffusion_do_mask_loss_for_padding: c.diffusion_do_mask_loss_for_padding,
+        }
+      : {}),
   };
 }
 
@@ -125,6 +152,7 @@ const ConfigurationMode: React.FC = () => {
     target: { runner: "local" },
     dataset_repo_id: prefilledDatasetRepoId,
     policy_type: "act",
+    fine_tune: false,
     steps: 10000,
     batch_size: 8,
     seed: 1000,
@@ -296,11 +324,14 @@ const ConfigurationMode: React.FC = () => {
   const startDisabled =
     isStarting ||
     !trainingConfig.dataset_repo_id.trim() ||
+    (trainingConfig.fine_tune && !trainingConfig.policy_path) ||
     localBlocked ||
     (targetRequiresAuth && !authenticated) ||
     targetMissingFlavor;
   const startTooltip = localBlocked
     ? "Another local training is already running"
+    : trainingConfig.fine_tune && !trainingConfig.policy_path
+    ? "Select a trained model and checkpoint"
     : targetRequiresAuth && !authenticated
     ? "Log in to Hugging Face to use cloud compute"
     : targetMissingFlavor
@@ -564,6 +595,28 @@ const MonitoringMode: React.FC<{ jobId: string }> = ({ jobId }) => {
     }
   };
 
+  const handleRename = async () => {
+    if (!job) return;
+    const nextName = window.prompt("New network name:", job.name);
+    if (nextName == null) return;
+    const cleaned = nextName.trim();
+    if (!cleaned) {
+      toast({ title: "Rename failed", description: "Name cannot be empty.", variant: "destructive" });
+      return;
+    }
+    try {
+      const next = await renameJob(baseUrl, fetchWithHeaders, job.id, cleaned);
+      setJob(next);
+      toast({ title: "Name updated", description: next.name });
+    } catch (e) {
+      toast({
+        title: "Rename failed",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    }
+  };
+
   if (error && !job) {
     return (
       <div className="min-h-screen bg-slate-900 text-white p-4">
@@ -602,6 +655,15 @@ const MonitoringMode: React.FC<{ jobId: string }> = ({ jobId }) => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-semibold text-white">{job.name}</h1>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleRename}
+                  className="h-7 w-7 text-slate-400 hover:text-white"
+                  aria-label="Rename network"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
                 {job.runner === "hf_cloud" ? (
                   <span className="text-xs px-2 py-0.5 rounded bg-amber-900/40 text-amber-200 border border-amber-700">
                     HF · {job.hf_flavor ?? "cloud"}

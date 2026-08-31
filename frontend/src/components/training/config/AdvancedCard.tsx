@@ -233,16 +233,6 @@ const AdvancedCard: React.FC<ConfigComponentProps> = ({ config, updateConfig }) 
                 Save Checkpoints
               </Label>
             </div>
-            <div className="flex items-center space-x-3">
-              <Switch
-                id="resume"
-                checked={config.resume}
-                onCheckedChange={(checked) => updateConfig('resume', checked)}
-              />
-              <Label htmlFor="resume" className="text-slate-300">
-                Resume from Checkpoint
-              </Label>
-            </div>
           </section>
 
           {config.wandb_enable && (

@@ -11,6 +11,7 @@ import {
   Loader2,
   XCircle,
   ExternalLink,
+  Pause,
   Play,
 } from "lucide-react";
 import { useApi } from "@/contexts/ApiContext";
@@ -40,6 +41,7 @@ const statePresentation: Record<
   { label: string; color: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
   running: { label: "Running", color: "text-green-400", Icon: Loader2 },
+  paused: { label: "Paused", color: "text-amber-400", Icon: Pause },
   done: { label: "Done", color: "text-slate-400", Icon: CheckCircle2 },
   failed: { label: "Failed", color: "text-red-400", Icon: XCircle },
   interrupted: { label: "Interrupted", color: "text-amber-400", Icon: AlertTriangle },
@@ -51,6 +53,7 @@ const JobCard: React.FC<Props> = ({ job, onStop, onDelete, onPlay }) => {
   const present = statePresentation[job.state];
   const Icon = present.Icon;
   const isRunning = job.state === "running";
+  const isActive = isRunning || job.state === "paused";
   const isImported = job.runner === "imported";
   const importedSource = job.hf_repo_id || job.output_dir;
   const stateLabel = isImported ? "Imported" : present.label;
@@ -64,7 +67,7 @@ const JobCard: React.FC<Props> = ({ job, onStop, onDelete, onPlay }) => {
     ? importedSource
     : isStarting
     ? "starting…"
-    : isRunning
+    : isActive
     ? `started ${relativeTime(job.started_at)}`
     : job.ended_at != null
     ? `ended ${relativeTime(job.ended_at)}`
@@ -106,7 +109,7 @@ const JobCard: React.FC<Props> = ({ job, onStop, onDelete, onPlay }) => {
 
   const handleAction = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isRunning) {
+    if (isActive) {
       if (window.confirm("Stop this run?")) onStop(job.id);
     } else if (isImported) {
       if (window.confirm("Remove this imported model? The source files are left untouched."))
@@ -122,7 +125,7 @@ const JobCard: React.FC<Props> = ({ job, onStop, onDelete, onPlay }) => {
     onPlay(job, selectedStep);
   };
 
-  const showProgressBar = isRunning;
+  const showProgressBar = isActive;
   const showInferenceRow = checkpoints.length > 0 && selectedStep != null;
 
   return (
@@ -163,9 +166,9 @@ const JobCard: React.FC<Props> = ({ job, onStop, onDelete, onPlay }) => {
               size="icon"
               onClick={handleAction}
               className="h-7 w-7 text-slate-400 hover:text-white"
-              aria-label={isRunning ? "Stop job" : "Delete job"}
+              aria-label={isActive ? "Stop job" : "Delete job"}
             >
-              {isRunning ? <Square className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+              {isActive ? <Square className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
             </Button>
           )}
         </div>

@@ -28,8 +28,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.datastructures import Headers
@@ -37,36 +36,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from . import datasets as dataset_browser
+# Import our custom recording functionality
+from . import datasets as dataset_browser, record as _record
 
 # Import our custom calibration functionality
 from .calibrate import CalibrationRequest, calibration_manager
-from .jobs import (
-    JobAlreadyRunningError,
-    JobNotFoundError,
-    JobNotRunningError,
-    JobTarget,
-    job_registry,
-)
-
-# Import our custom recording functionality
-from .record import (
-    DatasetInfoRequest,
-    RecordingRequest,
-    UploadRequest,
-    camera_feed_frames,
-    handle_delete_dataset,
-    handle_exit_early,
-    handle_get_dataset_info,
-    handle_pause_recording,
-    handle_recording_status,
-    handle_rerecord_episode,
-    handle_resume_recording,
-    handle_start_recording,
-    handle_stop_recording,
-    handle_upload_dataset,
-    recording_active,
-)
 from .dataset_edit import (
     DeleteEpisodesInplaceRequest,
     DeleteEpisodesRequest,
@@ -79,6 +53,28 @@ from .dataset_edit import (
     handle_merge_status,
     handle_serve_video_file,
     handle_start_merge,
+)
+from .jobs import (
+    JobAlreadyRunningError,
+    JobNotFoundError,
+    JobNotRunningError,
+    JobTarget,
+    job_registry,
+)
+from .record import (
+    DatasetInfoRequest,
+    RecordingRequest,
+    UploadRequest,
+    handle_delete_dataset,
+    handle_exit_early,
+    handle_get_dataset_info,
+    handle_pause_recording,
+    handle_recording_status,
+    handle_rerecord_episode,
+    handle_resume_recording,
+    handle_start_recording,
+    handle_stop_recording,
+    handle_upload_dataset,
 )
 from .rollout import (
     InferenceRequest,
@@ -484,7 +480,6 @@ def camera_feed(cam_key: str):
     frontend just points an <img> at this URL. Only valid while a session is
     active; the generator ends itself when recording stops.
     """
-    import lelab.record as _record
     if not _record.recording_active:
         raise HTTPException(status_code=409, detail="No active recording session")
     return StreamingResponse(
@@ -589,8 +584,8 @@ def dataset_video_file(repo_id: str, path: str):
     from fastapi.responses import FileResponse as _FileResponse
     try:
         file_path = handle_serve_video_file(repo_id, path)
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _FileResponse(
         str(file_path),
         media_type="video/mp4",
