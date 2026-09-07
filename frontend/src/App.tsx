@@ -12,6 +12,7 @@ import Training from "@/pages/Training";
 import Inference from "@/pages/Inference";
 import EditDataset from "@/pages/EditDataset";
 import RerecordEpisode from "@/pages/RerecordEpisode";
+import VisualizeDataset from "@/pages/VisualizeDataset";
 import Upload from "@/pages/Upload";
 
 import NotFound from "@/pages/NotFound";
@@ -48,6 +49,7 @@ function App() {
                         <Route path="/calibration" element={<Calibration />} />
                         <Route path="/edit-dataset" element={<EditDataset />} />
                         <Route path="/rerecord" element={<RerecordEpisode />} />
+                        <Route path="/visualize" element={<VisualizeDataset />} />
 
                         <Route path="*" element={<NotFound />} />
                       </Routes>

@@ -26,6 +26,7 @@ This repository contains custom changes based on the original <a href="https://g
 | 🧠 **Training controls** | Pause, resume, stop, monitor, and rename local training jobs from the browser. |
 | 🎯 **Model fine-tuning** | Initialize a new training run from a compatible local or imported checkpoint while keeping it separate from interrupted-run recovery. |
 | ⚙️ **Diffusion configuration** | Configure Diffusion Policy horizons, encoders, U-Net options, schedulers, timesteps, prediction behavior, and loss masking in the interface. |
+| 🎬 **Dataset visualization** | Inspect any dataset episode with synced multi-camera video playback and live state/action charts, without leaving the browser. |
 
 The crash-safety changes affect the separate LeRobot core checkout; the other features are implemented in this LeLab fork. See [CHANGES.md](CHANGES.md) for the complete technical description and [GettingStarted.md](GettingStarted.md) for installation instructions.
 
@@ -36,10 +37,11 @@ Explore these sections after starting LeLab:
 1. **Home and robot setup** — configure a robot and cameras, then open the calibration or teleoperation workflow.
 2. **Recording** — create demonstrations while monitoring all configured camera feeds; pause and resume safely between episodes.
 3. **Edit Datasets** — merge local datasets or remove unwanted episodes.
-4. **Add / Re-record** — inspect episodes, replay their camera videos, replace selected demonstrations, or append new ones.
-5. **Training** — configure ACT or Diffusion Policy, fine-tune from a compatible checkpoint, and monitor, pause, resume, stop, or rename local jobs.
-6. **Inference** — run a trained policy and monitor its live camera feeds alongside rollout progress.
-7. **Upload** — publish a completed dataset to the <a href="https://huggingface.co/">Hugging Face Hub</a>.
+4. **Visualize Dataset** — pick an episode and review its cameras in sync alongside `observation.state`/`action` charts.
+5. **Add / Re-record** — inspect episodes, replay their camera videos, replace selected demonstrations, or append new ones.
+6. **Training** — configure ACT or Diffusion Policy, fine-tune from a compatible checkpoint, and monitor, pause, resume, stop, or rename local jobs.
+7. **Inference** — run a trained policy and monitor its live camera feeds alongside rollout progress.
+8. **Upload** — publish a completed dataset to the <a href="https://huggingface.co/">Hugging Face Hub</a>.
 
 ## Contribute
 

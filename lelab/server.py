@@ -48,6 +48,7 @@ from .dataset_edit import (
     handle_delete_episodes,
     handle_delete_episodes_inplace,
     handle_get_editable_datasets,
+    handle_get_episode_data,
     handle_get_episode_video_info,
     handle_get_episodes,
     handle_merge_status,
@@ -576,6 +577,16 @@ def dataset_episodes(repo_id: str):
 def dataset_episode_video_info(repo_id: str, episode_index: int):
     """Return video file paths and timestamps for one episode."""
     return handle_get_episode_video_info(repo_id, episode_index)
+
+
+@app.get("/dataset-episode-data")
+def dataset_episode_data(repo_id: str, episode_index: int):
+    """Return per-frame timestamps and numeric feature series for one episode.
+
+    Used by the in-app dataset visualizer to render state/action line charts
+    synced to video playback.
+    """
+    return handle_get_episode_data(repo_id, episode_index)
 
 
 @app.get("/dataset-video-file")

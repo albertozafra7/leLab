@@ -23,6 +23,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# Bookkeeping columns that aren't meaningful to plot as a value-over-time series.
+_SKIP_PLOT_KEYS = {"index", "episode_index", "frame_index", "task_index", "timestamp"}
+
 # ── Merge job state ────────────────────────────────────────────────────────────
 
 _merge_lock = threading.Lock()
@@ -246,6 +249,93 @@ def handle_get_episodes(repo_id: str) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"get_episodes failed for {repo_id}: {e}")
         return {"success": False, "message": str(e), "episodes": []}
+
+
+def handle_get_episode_data(repo_id: str, episode_index: int) -> dict[str, Any]:
+    """Return per-frame timestamps and numeric feature series for one episode.
+
+    Powers the in-app dataset visualizer (video playback paired with synced
+    line charts of state/action values), mirroring the upstream
+    `lerobot/visualize_dataset` Space without requiring a Hub upload.
+    """
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+        dataset = LeRobotDataset(repo_id)
+        eps = dataset.meta.episodes
+        if episode_index >= len(eps):
+            return {
+                "success": False,
+                "message": f"Episode {episode_index} not found",
+                "timestamps": [],
+                "series": [],
+            }
+
+        row = eps[episode_index]
+        from_idx = int(row["dataset_from_index"])
+        to_idx = int(row["dataset_to_index"])
+        if to_idx <= from_idx:
+            return {"success": False, "message": "Episode has no frames", "timestamps": [], "series": []}
+
+        # Slicing the underlying HF dataset returns raw columns (no video
+        # decoding, no image transforms) — but as torch tensors / numpy
+        # arrays for numeric features, not plain python values.
+        frame_data = dataset.hf_dataset[from_idx:to_idx]
+        if "timestamp" not in frame_data:
+            return {
+                "success": False,
+                "message": "Dataset has no 'timestamp' column",
+                "timestamps": [],
+                "series": [],
+            }
+        timestamps = [float(t) for t in frame_data["timestamp"]]
+
+        series: list[dict[str, Any]] = []
+        for key, ft in dataset.features.items():
+            if key in _SKIP_PLOT_KEYS or ft.get("dtype") in ("video", "image") or key not in frame_data:
+                continue
+            values = frame_data[key]
+            if not values:
+                continue
+            # frame_data columns are lists whose *elements* may be torch
+            # tensors or numpy arrays (not python list/tuple/float) when the
+            # underlying hf_dataset is formatted as torch — the outer
+            # container is a plain list, so checking hasattr(values, "tolist")
+            # on the whole column misses this. Normalize element-by-element.
+            values = [v.tolist() if hasattr(v, "tolist") else v for v in values]
+            names = ft.get("names")
+            first = values[0]
+            if isinstance(first, (list, tuple)):
+                dim = len(first)
+                for d in range(dim):
+                    label = names[d] if names and d < len(names) else f"{key}_{d}"
+                    series.append(
+                        {
+                            "key": f"{key}.{d}",
+                            "feature": key,
+                            "label": label,
+                            "values": [float(v[d]) for v in values],
+                        }
+                    )
+            else:
+                series.append(
+                    {
+                        "key": key,
+                        "feature": key,
+                        "label": key,
+                        "values": [float(v) for v in values],
+                    }
+                )
+
+        return {
+            "success": True,
+            "episode_index": episode_index,
+            "timestamps": timestamps,
+            "series": series,
+        }
+    except Exception as e:
+        logger.error(f"get_episode_data failed for {repo_id} ep{episode_index}: {e}")
+        return {"success": False, "message": str(e), "timestamps": [], "series": []}
 
 
 def handle_delete_episodes_inplace(request: DeleteEpisodesInplaceRequest) -> dict[str, Any]:

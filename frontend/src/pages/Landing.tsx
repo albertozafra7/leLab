@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronsUpDown, Pencil, RefreshCw } from "lucide-react";
+import { ChevronsUpDown, Pencil, RefreshCw, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import LandingTopBar from "@/components/landing/LandingTopBar";
@@ -285,6 +285,14 @@ const Landing = () => {
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Add / Re-record
+              </Button>
+              <Button
+                onClick={() => navigate("/visualize")}
+                variant="outline"
+                className="w-full border-gray-600 text-gray-200 hover:bg-gray-700 hover:text-white"
+              >
+                <PlayCircle className="w-4 h-4 mr-2" />
+                Visualize
               </Button>
             </div>
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-3 flex flex-col gap-2">

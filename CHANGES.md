@@ -2,7 +2,7 @@
 
 This document summarises **all changes** made to the LeRobot core library and the LeLab GUI from the original upstream versions.
 
-> **Repository scope:** This repository contains the LeLab changes in Parts 2 and 5. The three LeRobot core changes in Part 1 must be applied in a separate LeRobot checkout; installing this repository does not patch LeRobot's source files.
+> **Repository scope:** This repository contains the LeLab changes in Parts 2, 5, and 6. The three LeRobot core changes in Part 1 must be applied in a separate LeRobot checkout; installing this repository does not patch LeRobot's source files.
 
 > chat seed: 9ff62455-257b-4026-b9bb-81fa1efb037c
 
@@ -26,6 +26,7 @@ This document summarises **all changes** made to the LeRobot core library and th
 | 12 | LeLab GUI | Training run names cannot be corrected | Persistent job renaming from the monitoring page |
 | 13 | LeLab GUI | Inference preview competes for exclusive cameras | Publish frames from the camera-owning rollout subprocess |
 | 14 | LeLab GUI | Recording camera streams can use stale state during start/teardown | Read live module state and snapshot the active robot safely |
+| 15 | LeLab GUI | No way to inspect episode videos and sensor data together | New Visualize Dataset page (synced multi-camera video + state/action charts) |
 
 ---
 
@@ -380,3 +381,36 @@ On `main`, `.github/workflows/build_frontend.yml` automatically rebuilds and com
 - Added a `ResizeObserver` and an aspect-ratio-aware packing calculation to maximize each camera window for any camera count.
 - Camera windows are centered inside the status card and consume `/inference-camera-feed/{key}` as MJPEG, with an overlaid short camera name.
 - Setup/rollout status, timer, progress, policy name, and Stop control remain visible without page scrolling.
+
+---
+
+## Part 6 — Dataset Visualization
+
+**Context:** Reviewing a recorded/imported dataset previously required downloading it and using the upstream `lerobot/visualize_dataset` Hugging Face Space. This adds an equivalent, local, in-app visualizer: pick a dataset and episode, watch every camera in sync, and follow `observation.state`/`action` (and other numeric features) plotted against playback time with a live cursor.
+
+### 6.1 `lelab/dataset_edit.py` — New episode-data endpoint backend
+
+- Added `handle_get_episode_data(repo_id, episode_index)`, which loads the requested episode's frame range from `dataset.hf_dataset` and returns `{success, episode_index, timestamps, series}`.
+- Added module-level `_SKIP_PLOT_KEYS = {"index", "episode_index", "frame_index", "task_index", "timestamp"}` to exclude bookkeeping columns from the plotted series.
+- Vector features (e.g. `observation.state`, `action`) are split into one series per dimension (`action.0`, `action.1`, ...); scalar features are returned as a single series.
+- **Bug fix:** `dataset.hf_dataset[from_idx:to_idx]` returns each column as a plain Python `list`, but when the dataset is torch-formatted, the *individual elements* of that list are still `torch.Tensor` objects (0-d for scalars, 1-d for vectors). The code now normalizes every element with `v.tolist() if hasattr(v, "tolist") else v` before inspecting its shape, fixing a `"only one element tensors can be converted to Python scalars"` crash that occurred for every vector feature.
+
+### 6.2 `lelab/server.py` — New API endpoint
+
+- Imports `handle_get_episode_data` from `.dataset_edit`.
+- Added endpoint: `GET /dataset-episode-data?repo_id=...&episode_index=...` — returns per-frame timestamps and numeric feature series for the requested episode.
+
+### 6.3 `frontend/src/pages/VisualizeDataset.tsx` — NEW: Dataset visualizer page
+
+- Dataset and episode pickers reusing the existing `/edit/datasets` and `/dataset-episodes` endpoints.
+- Multi-camera synced video playback: one camera acts as the master clock; the others follow it via `requestAnimationFrame`, polling `master.currentTime` and correcting drift.
+- Per-feature line charts (Recharts) grouped by base key (e.g. all `action.*` dimensions in one chart), each with a moving `ReferenceLine` cursor synced to video playback and click-to-seek support.
+- Consumes `/dataset-episode-video-info`, `/dataset-episode-data`, and `/dataset-video-file` (existing streaming endpoint) in addition to the new endpoint above.
+
+### 6.4 `frontend/src/App.tsx` — New route
+
+- Added `<Route path="/visualize" element={<VisualizeDataset />} />`.
+
+### 6.5 `frontend/src/pages/Landing.tsx` — New entry point
+
+- Added a "Visualize" button (`PlayCircle` icon) to the Edit Datasets card, navigating to `/visualize`.
